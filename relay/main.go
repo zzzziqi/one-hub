@@ -17,16 +17,23 @@ import (
 )
 
 type CustomResponseWriter struct {
-	gin.ResponseWriter
-	body *bytes.Buffer
+    gin.ResponseWriter
+    body *bytes.Buffer
 }
 
 func (w *CustomResponseWriter) Write(b []byte) (int, error) {
-	return w.body.Write(b) // 仅写入缓冲区，避免直接写入响应
+    // 将数据写入缓冲区（暂不写入到实际的 ResponseWriter）
+    return w.body.Write(b)
 }
 
 func (w *CustomResponseWriter) WriteString(s string) (int, error) {
-	return w.body.WriteString(s) // 仅写入缓冲区，避免直接写入响应
+    // 将字符串写入缓冲区（暂不写入到实际的 ResponseWriter）
+    return w.body.WriteString(s)
+}
+
+func (w *CustomResponseWriter) WriteHeader(statusCode int) {
+    // 捕获状态码，以便后续使用
+    w.ResponseWriter.WriteHeader(statusCode)
 }
 
 func Relay(c *gin.Context) {
@@ -143,45 +150,32 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 }
 
 func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) {
-    // 如果响应体为空，直接返回
     if len(bodyBytes) == 0 {
-        logger.LogError(c.Request.Context(), "response body is empty")
         return
     }
 
-    // 解析响应体为 JSON
     var responseBody map[string]interface{}
     if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
         logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
-        c.Writer.WriteHeader(http.StatusInternalServerError)
         return
     }
 
-    // 检查是否存在 "model" 字段
     if _, exists := responseBody["model"]; exists {
-        logger.LogInfo(c.Request.Context(), fmt.Sprintf("Original model: %s", responseBody["model"]))
         responseBody["model"] = relay.getOriginalModel()
-        logger.LogInfo(c.Request.Context(), fmt.Sprintf("Modified model: %s", relay.getOriginalModel()))
-    } else {
-        logger.LogError(c.Request.Context(), "response body does not contain 'model' field")
-        // 如果字段不存在，可以选择是否要创建它
-        // responseBody["model"] = relay.getOriginalModel()
     }
 
-    // 重新编码修改后的响应体
     modifiedResponse, err := json.Marshal(responseBody)
     if err != nil {
         logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
-        c.Writer.WriteHeader(http.StatusInternalServerError)
         return
     }
 
     // 覆盖写入新的响应体
     c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedResponse)))
     c.Writer.WriteHeader(http.StatusOK)
-    if _, err := c.Writer.Write(modifiedResponse); err != nil {
+    _, err = c.Writer.Write(modifiedResponse)
+    if err != nil {
         logger.LogError(c.Request.Context(), fmt.Sprintf("failed to write modified response body: %v", err))
-        return
     }
 }
 
