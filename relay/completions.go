@@ -73,17 +73,40 @@ func (r *relayCompletions) send() (err *types.OpenAIErrorWithStatusCode, done bo
 			return
 		}
 
+		// 包装流式响应的处理函数，修改 model 字段
+		wrappedResponse := &wrappedStreamReader{
+			StreamReaderInterface: response,
+			onFirstChunk: func(data []byte) []byte {
+				// 在第一个块中修改 model 字段
+				var jsonResponse map[string]interface{}
+				if err := json.Unmarshal(data, &jsonResponse); err == nil {
+					if _, exists := jsonResponse["model"]; exists {
+						jsonResponse["model"] = "hillo"
+						modifiedData, _ := json.Marshal(jsonResponse)
+						return modifiedData
+					}
+				}
+				return data
+			},
+		}
+
 		doneStr := func() string {
 			return r.getUsageResponse()
 		}
 
-		err = responseStreamClient(r.c, response, r.cache, doneStr)
+		err = responseStreamClient(r.c, wrappedResponse, r.cache, doneStr)
 	} else {
 		var response *types.CompletionResponse
 		response, err = provider.CreateCompletion(&r.request)
 		if err != nil {
 			return
 		}
+
+		// 修改 response 的 model 字段为 "hillo"
+		if response != nil && response.Model != "" {
+			response.Model = "hillo"
+		}
+
 		err = responseJsonClient(r.c, response)
 		r.cache.SetResponse(response)
 	}
@@ -95,13 +118,31 @@ func (r *relayCompletions) send() (err *types.OpenAIErrorWithStatusCode, done bo
 	return
 }
 
+// 包装 StreamReaderInterface，以便在处理流式数据时修改数据
+type wrappedStreamReader struct {
+	requester.StreamReaderInterface[string]
+	onFirstChunk func(data []byte) []byte
+	firstChunk   bool
+}
+
+func (w *wrappedStreamReader) Read(p []byte) (int, error) {
+	n, err := w.StreamReaderInterface.Read(p)
+	if err == nil && n > 0 && !w.firstChunk {
+		w.firstChunk = true
+		modifiedData := w.onFirstChunk(p[:n])
+		copy(p, modifiedData)
+		n = len(modifiedData)
+	}
+	return n, err
+}
+
 func (r *relayCompletions) getUsageResponse() string {
 	if r.request.StreamOptions != nil && r.request.StreamOptions.IncludeUsage {
 		usageResponse := types.CompletionResponse{
 			ID:      fmt.Sprintf("chatcmpl-%s", utils.GetUUID()),
 			Object:  "chat.completion.chunk",
 			Created: utils.GetTimestamp(),
-			//Model:   r.request.Model,
+			Model:   r.request.Model,
 			Choices: []types.CompletionChoice{},
 			Usage:   r.provider.GetUsage(),
 		}
