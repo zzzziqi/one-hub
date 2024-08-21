@@ -113,7 +113,7 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 	}
 
 	// 添加后处理步骤
-	relay.postProcessResponse()
+	postProcessResponse(relay.getContext(), relay.getOriginalModel())
 
 	quota.Consume(relay.getContext(), usage)
 	if usage.CompletionTokens > 0 {
@@ -122,6 +122,59 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 	}
 
 	return
+}
+
+// 新增 postProcessResponse 函数
+func postProcessResponse(c *gin.Context, originalModel string) {
+	// 获取写入的响应
+	responseData, exists := c.Get("responseBody")
+	if !exists {
+		return // 如果没有响应数据，直接返回
+	}
+
+	// 将响应转换为 map
+	var responseMap map[string]interface{}
+	if err := json.Unmarshal(responseData.([]byte), &responseMap); err != nil {
+		return // 如果无法解析为 JSON，直接返回
+	}
+
+	// 修改 model 字段
+	if _, ok := responseMap["model"]; ok {
+		responseMap["model"] = originalModel
+	}
+
+	// 将修改后的 map 转回 JSON
+	modifiedResponse, err := json.Marshal(responseMap)
+	if err != nil {
+		return // 如果无法转换回 JSON，直接返回
+	}
+
+	// 替换原有的响应
+	c.Set("responseBody", modifiedResponse)
+
+	// 如果响应已经被写入，我们需要修改 ResponseWriter
+	if c.Writer.Written() {
+		// 创建一个新的 ResponseWriter
+		newWriter := &responseBodyWriter{body: bytes.NewBuffer(nil), ResponseWriter: c.Writer}
+		c.Writer = newWriter
+	}
+
+	// 写入修改后的响应
+	c.Data(200, "application/json", modifiedResponse)
+}
+
+// 新增 responseBodyWriter 结构体
+type responseBodyWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (r *responseBodyWriter) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func (r *responseBodyWriter) WriteString(s string) (int, error) {
+	return r.body.WriteString(s)
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
