@@ -23,12 +23,10 @@ type CustomResponseWriter struct {
 }
 
 func (w *CustomResponseWriter) Write(b []byte) (int, error) {
-    // 将数据写入缓冲区（暂不写入到实际的 ResponseWriter）
     return w.body.Write(b)
 }
 
 func (w *CustomResponseWriter) WriteString(s string) (int, error) {
-    // 将字符串写入缓冲区（暂不写入到实际的 ResponseWriter）
     return w.body.WriteString(s)
 }
 
@@ -46,7 +44,6 @@ func Relay(c *gin.Context) {
 		return
 	}
 
-	// Use the custom response writer
 	customWriter := &CustomResponseWriter{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
 	c.Writer = customWriter
 
@@ -58,11 +55,9 @@ func Relay(c *gin.Context) {
 	cacheProps := relay.GetChatCache()
 	cacheProps.SetHash(relay.getRequest())
 
-	// 获取缓存
 	cache := cacheProps.GetCache()
 
 	if cache != nil {
-		// 说明有缓存， 直接返回缓存内容
 		cacheProcessing(c, cache, relay.IsStream())
 		return
 	}
@@ -74,23 +69,21 @@ func Relay(c *gin.Context) {
 
 	apiErr, done := RelayHandler(relay, c)
 	if apiErr == nil {
-		// Modify the response body after successful relay handling
-	        modifiedBody, err := modifyResponseBody(relay, customWriter.body.Bytes())
-	        if err != nil {
-	            logger.LogError(c.Request.Context(), err.Error())
-	            common.AbortWithMessage(c, http.StatusInternalServerError, "Internal Server Error")
-	            return
-	        }
-	        
-	        // Write the modified response
-	        c.Writer.Header().Set("Content-Type", "application/json")
-	        c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedBody)))
-	        c.Writer.WriteHeader(http.StatusOK)
-	        _, err = c.Writer.Write(modifiedBody)
-	        if err != nil {
-	            logger.LogError(c.Request.Context(), fmt.Sprintf("failed to write modified response body: %v", err))
-	        }
-	        return
+		modifiedBody, err := modifyResponseBody(relay, customWriter.body.Bytes())
+		if err != nil {
+			logger.LogError(c.Request.Context(), err.Error())
+			common.AbortWithMessage(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		
+		c.Writer.Header().Set("Content-Type", "application/json")
+		c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedBody)))
+		c.Writer.WriteHeader(http.StatusOK)
+		_, err = c.Writer.Write(modifiedBody)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to write modified response body: %v", err))
+		}
+		return
 	}
 
 	channel := relay.getProvider().GetChannel()
@@ -103,7 +96,6 @@ func Relay(c *gin.Context) {
 	}
 
 	for i := retryTimes; i > 0; i-- {
-		// 冻结通道
 		model.ChannelGroup.Cooldowns(channel.Id)
 		if err := relay.setProvider(relay.getOriginalModel()); err != nil {
 			continue
@@ -191,7 +183,6 @@ func modifyResponseBody(relay RelayBaseInterface, bodyBytes []byte) ([]byte, err
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
 	responseCache(c, cacheProps.Response, isStream)
 
-	// 写入日志
 	tokenName := c.GetString("token_name")
 
 	requestTime := 0
