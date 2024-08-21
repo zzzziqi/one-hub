@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"one-api/common"
@@ -44,7 +43,7 @@ func Relay(c *gin.Context) {
 		return
 	}
 
-	apiErr, done := RelayHandler(relay, c)
+	apiErr, done := RelayHandler(relay)
 	if apiErr == nil {
 		return
 	}
@@ -67,7 +66,7 @@ func Relay(c *gin.Context) {
 
 		channel = relay.getProvider().GetChannel()
 		logger.LogError(c.Request.Context(), fmt.Sprintf("using channel #%d(%s) to retry (remain times %d)", channel.Id, channel.Name, i))
-		apiErr, done = RelayHandler(relay, c)
+		apiErr, done = RelayHandler(relay)
 		if apiErr == nil {
 			return
 		}
@@ -85,10 +84,10 @@ func Relay(c *gin.Context) {
 	}
 }
 
-func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIErrorWithStatusCode, done bool) {
-	promptTokens, tokenErr := relay.getPromptTokens()
-	if tokenErr != nil {
-		err = common.ErrorWrapperLocal(tokenErr, "token_error", http.StatusBadRequest)
+func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCode, done bool) {
+	promptTokens, tonkeErr := relay.getPromptTokens()
+	if tonkeErr != nil {
+		err = common.ErrorWrapperLocal(tonkeErr, "token_error", http.StatusBadRequest)
 		done = true
 		return
 	}
@@ -106,16 +105,15 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 		return
 	}
 
-	if relay.IsStream() {
-		err = handleStreamResponse(relay, c)
-	} else {
-		err = handleNonStreamResponse(relay, c)
-	}
+	err, done = relay.send()
 
 	if err != nil {
 		quota.Undo(relay.getContext())
 		return
 	}
+
+	// 添加后处理步骤
+	relay.postProcessResponse()
 
 	quota.Consume(relay.getContext(), usage)
 	if usage.CompletionTokens > 0 {
@@ -124,55 +122,6 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 	}
 
 	return
-}
-
-func handleStreamResponse(relay RelayBaseInterface, c *gin.Context) *types.OpenAIErrorWithStatusCode {
-	responseStream, err := relay.sendStream()
-	if err != nil {
-		return err
-	}
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	c.Stream(func(w io.Writer) bool {
-		for chunk := range responseStream {
-			// 修改 "model" 字段
-			if chunk.Model != "" {
-				chunk.Model = relay.getOriginalModel()
-			}
-			
-			encodedChunk, err := json.Marshal(chunk)
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode chunk: %v", err))
-				return false
-			}
-			
-			c.SSEvent("", string(encodedChunk))
-			return true
-		}
-		return false
-	})
-
-	return nil
-}
-
-func handleNonStreamResponse(relay RelayBaseInterface, c *gin.Context) *types.OpenAIErrorWithStatusCode {
-	response, err := relay.send()
-	if err != nil {
-		return err
-	}
-
-	// 修改 "model" 字段
-	if response.Model != "" {
-		response.Model = relay.getOriginalModel()
-	}
-
-	// 编码并发送修改后的响应
-	c.JSON(http.StatusOK, response)
-
-	return nil
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
