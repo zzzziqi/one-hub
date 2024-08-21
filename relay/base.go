@@ -75,3 +75,9 @@ func (r *relayBase) getModelName() string {
 	//return r.modelName
 	return r.originalModel
 }
+
+func (r *relayBase) postProcessResponse() {
+    if r.response != nil {
+        r.response.Model = r.originalModel
+    }
+}
