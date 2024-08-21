@@ -71,5 +71,6 @@ func (r *relayBase) getOriginalModel() string {
 }
 
 func (r *relayBase) getModelName() string {
-	return r.modelName
+	//return r.modelName
+	return r.originalModel
 }
