@@ -66,6 +66,8 @@ func Relay(c *gin.Context) {
 
 	apiErr, done := RelayHandler(relay, c)
 	if apiErr == nil {
+		// Modify the response body after successful relay handling
+		modifyResponseBody(c, relay, customWriter.body.Bytes())
 		return
 	}
 
@@ -138,9 +140,6 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 		cacheProps := relay.GetChatCache()
 		go cacheProps.StoreCache(relay.getContext().GetInt("channel_id"), usage.PromptTokens, usage.CompletionTokens, relay.getModelName())
 	}
-
-	// 修改ResponseBody的model字段为relay.originalModel
-	modifyResponseBody(c, relay)
 
 	return
 }
