@@ -22,13 +22,11 @@ type CustomResponseWriter struct {
 }
 
 func (w *CustomResponseWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
-	return w.ResponseWriter.Write(b)
+	return w.body.Write(b) // 仅写入缓冲区，避免直接写入响应
 }
 
 func (w *CustomResponseWriter) WriteString(s string) (int, error) {
-	w.body.WriteString(s)
-	return w.ResponseWriter.WriteString(s)
+	return w.body.WriteString(s) // 仅写入缓冲区，避免直接写入响应
 }
 
 func Relay(c *gin.Context) {
