@@ -143,7 +143,7 @@ func (r *relayCompletions) getUsageResponse() string {
 			ID:      fmt.Sprintf("chatcmpl-%s", utils.GetUUID()),
 			Object:  "chat.completion.chunk",
 			Created: utils.GetTimestamp(),
-			Model:   r.request.Model,
+			Model:   r.originalModel,
 			Choices: []types.CompletionChoice{},
 			Usage:   r.provider.GetUsage(),
 		}
