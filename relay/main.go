@@ -18,39 +18,17 @@ import (
 
 type CustomResponseWriter struct {
 	gin.ResponseWriter
-	body        *bytes.Buffer
-	isStreaming bool
-	relay       RelayBaseInterface
+	body *bytes.Buffer
 }
 
 func (w *CustomResponseWriter) Write(b []byte) (int, error) {
-	if w.isStreaming {
-		modifiedChunk := w.modifyStreamChunk(b)
-		return w.ResponseWriter.Write(modifiedChunk)
-	}
-	return w.body.Write(b)
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
 }
 
 func (w *CustomResponseWriter) WriteString(s string) (int, error) {
-	return w.Write([]byte(s))
-}
-
-func (w *CustomResponseWriter) modifyStreamChunk(chunk []byte) []byte {
-	var data map[string]interface{}
-	if err := json.Unmarshal(chunk, &data); err != nil {
-		return chunk
-	}
-	
-	if _, ok := data["model"]; ok {
-		data["model"] = w.relay.getOriginalModel()
-	}
-	
-	modifiedChunk, err := json.Marshal(data)
-	if err != nil {
-		return chunk
-	}
-	
-	return modifiedChunk
+	w.body.WriteString(s)
+	return w.ResponseWriter.WriteString(s)
 }
 
 func Relay(c *gin.Context) {
@@ -60,13 +38,8 @@ func Relay(c *gin.Context) {
 		return
 	}
 
-	isStreaming := relay.IsStream()
-	customWriter := &CustomResponseWriter{
-		ResponseWriter: c.Writer,
-		body:           &bytes.Buffer{},
-		isStreaming:    isStreaming,
-		relay:          relay,
-	}
+	// Use the custom response writer
+	customWriter := &CustomResponseWriter{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
 	c.Writer = customWriter
 
 	if err := relay.setRequest(); err != nil {
@@ -77,9 +50,12 @@ func Relay(c *gin.Context) {
 	cacheProps := relay.GetChatCache()
 	cacheProps.SetHash(relay.getRequest())
 
+	// 获取缓存
 	cache := cacheProps.GetCache()
+
 	if cache != nil {
-		cacheProcessing(c, cache, isStreaming)
+		// 说明有缓存， 直接返回缓存内容
+		cacheProcessing(c, cache, relay.IsStream())
 		return
 	}
 
@@ -90,12 +66,8 @@ func Relay(c *gin.Context) {
 
 	apiErr, done := RelayHandler(relay, c)
 	if apiErr == nil {
-		if !isStreaming {
-			modifiedBody := modifyResponseBody(c, relay, customWriter.body.Bytes())
-			c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedBody)))
-			c.Writer.WriteHeader(http.StatusOK)
-			c.Writer.Write(modifiedBody)
-		}
+		// Modify the response body after successful relay handling
+		modifyResponseBody(c, relay, customWriter.body.Bytes())
 		return
 	}
 
@@ -109,6 +81,7 @@ func Relay(c *gin.Context) {
 	}
 
 	for i := retryTimes; i > 0; i-- {
+		// 冻结通道
 		model.ChannelGroup.Cooldowns(channel.Id)
 		if err := relay.setProvider(relay.getOriginalModel()); err != nil {
 			continue
@@ -132,30 +105,6 @@ func Relay(c *gin.Context) {
 		}
 		relayResponseWithErr(c, apiErr)
 	}
-}
-
-func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) []byte {
-	if len(bodyBytes) == 0 {
-		return bodyBytes
-	}
-
-	var responseBody map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
-		return bodyBytes
-	}
-
-	if _, exists := responseBody["model"]; exists {
-		responseBody["model"] = relay.getOriginalModel()
-	}
-
-	modifiedResponse, err := json.Marshal(responseBody)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
-		return bodyBytes
-	}
-
-	return modifiedResponse
 }
 
 func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIErrorWithStatusCode, done bool) {
@@ -195,9 +144,42 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 	return
 }
 
+func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) {
+    // If response body is empty, return directly
+    if len(bodyBytes) == 0 {
+        return
+    }
+
+    // Parse response body as JSON
+    var responseBody map[string]interface{}
+    if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
+        logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
+        return
+    }
+
+    // Modify "model" field
+    if _, exists := responseBody["model"]; exists {
+        responseBody["model"] = relay.getOriginalModel()
+    }
+
+    // Re-encode the modified response
+    modifiedResponse, err := json.Marshal(responseBody)
+    if err != nil {
+        logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
+        return
+    }
+
+    // Reset the response writer
+    c.Writer.Header().Set("Content-Type", "application/json")
+    c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedResponse)))
+    c.Writer.WriteHeader(http.StatusOK)
+    c.Writer.Write(modifiedResponse)
+}
+
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
 	responseCache(c, cacheProps.Response, isStream)
 
+	// 写入日志
 	tokenName := c.GetString("token_name")
 
 	requestTime := 0
