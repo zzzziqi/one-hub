@@ -1,8 +1,10 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"one-api/common"
 	"one-api/common/config"
@@ -34,7 +36,7 @@ func Relay(c *gin.Context) {
 	cache := cacheProps.GetCache()
 
 	if cache != nil {
-		// 说明有缓存， 直接返回缓存内容
+		// 说明有缓存，直接返回缓存内容
 		cacheProcessing(c, cache, relay.IsStream())
 		return
 	}
@@ -46,6 +48,8 @@ func Relay(c *gin.Context) {
 
 	apiErr, done := RelayHandler(relay)
 	if apiErr == nil {
+		// 修改响应体
+		modifyResponseBody(c, relay)
 		return
 	}
 
@@ -69,6 +73,8 @@ func Relay(c *gin.Context) {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("using channel #%d(%s) to retry (remain times %d)", channel.Id, channel.Name, i))
 		apiErr, done = RelayHandler(relay)
 		if apiErr == nil {
+			// 修改响应体
+			modifyResponseBody(c, relay)
 			return
 		}
 		go processChannelRelayError(c.Request.Context(), channel.Id, channel.Name, apiErr, channel.Type)
@@ -83,6 +89,54 @@ func Relay(c *gin.Context) {
 		}
 		relayResponseWithErr(c, apiErr)
 	}
+}
+
+// 修改ResponseBody中的model字段为relay.originalModel
+func modifyResponseBody(c *gin.Context, relay RelayBaseInterface) {
+	// 获取原始响应体
+	responseBody := extractResponseBody(c.Writer)
+	if responseBody == nil {
+		return
+	}
+
+	// 修改"model"字段为 relay.originalModel
+	if _, exists := responseBody["model"]; exists {
+		responseBody["model"] = relay.getOriginalModel()
+	}
+
+	// 将修改后的响应体重新编码并设置为响应
+	modifiedResponse, err := json.Marshal(responseBody)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
+		return
+	}
+
+	// 重置响应体，并将新的响应体写入
+	c.Writer.WriteHeaderNow()
+	c.Writer.Write(modifiedResponse)
+}
+
+// 提取响应体内容
+func extractResponseBody(w gin.ResponseWriter) map[string]interface{} {
+	var bodyBytes []byte
+	if w, ok := w.(io.Writer); ok {
+		buf := new(bytes.Buffer)
+		_, err := buf.ReadFrom(w)
+		if err == nil {
+			bodyBytes = buf.Bytes()
+		}
+	}
+
+	if len(bodyBytes) == 0 {
+		return nil
+	}
+
+	var responseBody map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
+		return nil
+	}
+
+	return responseBody
 }
 
 func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCode, done bool) {
@@ -119,35 +173,7 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 		go cacheProps.StoreCache(relay.getContext().GetInt("channel_id"), usage.PromptTokens, usage.CompletionTokens, relay.getModelName())
 	}
 
-	// 修改ResponseBody的model字段为r.originalModel
-	relay.modifyResponseBody(c)
-
 	return
-}
-
-// 添加修改ResponseBody的方法
-func (relay RelayBaseInterface) modifyResponseBody(c *gin.Context) {
-	var responseBody map[string]interface{}
-	// 解析响应体
-	if err := json.NewDecoder(c.Writer.Body).Decode(&responseBody); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
-		return
-	}
-
-	// 修改"model"字段为 relay.originalModel
-	if _, exists := responseBody["model"]; exists {
-		responseBody["model"] = relay.getOriginalModel()
-	}
-
-	// 将修改后的响应体重新编码并设置为响应
-	modifiedResponse, err := json.Marshal(responseBody)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
-		return
-	}
-
-	// 设置新的响应体
-	c.Writer.Write(modifiedResponse)
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
