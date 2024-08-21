@@ -11,9 +11,25 @@ import (
 	"one-api/relay/relay_util"
 	"one-api/types"
 	"time"
+	"bytes"
 
 	"github.com/gin-gonic/gin"
 )
+
+type CustomResponseWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (w *CustomResponseWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *CustomResponseWriter) WriteString(s string) (int, error) {
+	w.body.WriteString(s)
+	return w.ResponseWriter.WriteString(s)
+}
 
 func Relay(c *gin.Context) {
 	relay := Path2Relay(c, c.Request.URL.Path)
@@ -21,6 +37,10 @@ func Relay(c *gin.Context) {
 		common.AbortWithMessage(c, http.StatusNotFound, "Not Found")
 		return
 	}
+
+	// Use the custom response writer
+	customWriter := &CustomResponseWriter{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
+	c.Writer = customWriter
 
 	if err := relay.setRequest(); err != nil {
 		common.AbortWithMessage(c, http.StatusBadRequest, err.Error())
@@ -125,44 +145,34 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 	return
 }
 
-// 修改ResponseBody中的model字段为relay.originalModel
-func modifyResponseBody(c *gin.Context, relay RelayBaseInterface) {
-	// 这里不能从 c.Request.Body 读取，因为这是请求体而不是响应体
-	// 我们应该从响应体的输出缓存中读取
-
-	// 获取响应体的字节内容
-	responseWriter := c.Writer
-	responseRecorder := &gin.HijackWriter{Writer: responseWriter}
-	var bodyBytes []byte
-	bodyBytes = responseRecorder.Body.Bytes()
-
-	// 如果响应体为空，直接返回
+func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) {
+	// If response body is empty, return directly
 	if len(bodyBytes) == 0 {
 		return
 	}
 
-	// 解析响应体为map
+	// Parse response body as JSON
 	var responseBody map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
 		return
 	}
 
-	// 修改"model"字段为 relay.originalModel
+	// Modify "model" field
 	if _, exists := responseBody["model"]; exists {
 		responseBody["model"] = relay.getOriginalModel()
 	}
 
-	// 将修改后的响应体重新编码并设置为响应
+	// Re-encode the modified response
 	modifiedResponse, err := json.Marshal(responseBody)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
 		return
 	}
 
-	// 设置新的响应体
-	responseWriter.WriteHeader(http.StatusOK) // 确保状态码是200
-	responseWriter.Write(modifiedResponse)
+	// Write the modified response
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Write(modifiedResponse)
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
