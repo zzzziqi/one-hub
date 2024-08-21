@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"one-api/common"
@@ -118,7 +119,35 @@ func RelayHandler(relay RelayBaseInterface) (err *types.OpenAIErrorWithStatusCod
 		go cacheProps.StoreCache(relay.getContext().GetInt("channel_id"), usage.PromptTokens, usage.CompletionTokens, relay.getModelName())
 	}
 
+	// 修改ResponseBody的model字段为r.originalModel
+	relay.modifyResponseBody(c)
+
 	return
+}
+
+// 添加修改ResponseBody的方法
+func (relay RelayBaseInterface) modifyResponseBody(c *gin.Context) {
+	var responseBody map[string]interface{}
+	// 解析响应体
+	if err := json.NewDecoder(c.Writer.Body).Decode(&responseBody); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
+		return
+	}
+
+	// 修改"model"字段为 relay.originalModel
+	if _, exists := responseBody["model"]; exists {
+		responseBody["model"] = relay.getOriginalModel()
+	}
+
+	// 将修改后的响应体重新编码并设置为响应
+	modifiedResponse, err := json.Marshal(responseBody)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
+		return
+	}
+
+	// 设置新的响应体
+	c.Writer.Write(modifiedResponse)
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
