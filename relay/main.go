@@ -32,8 +32,10 @@ func (w *CustomResponseWriter) WriteString(s string) (int, error) {
 }
 
 func (w *CustomResponseWriter) WriteHeader(statusCode int) {
-    // 捕获状态码，以便后续使用
-    w.ResponseWriter.WriteHeader(statusCode)
+    // 捕获状态码，但不立即写入
+    if w.body.Len() == 0 {
+        w.ResponseWriter.WriteHeader(statusCode)
+    }
 }
 
 func Relay(c *gin.Context) {
