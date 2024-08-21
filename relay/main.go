@@ -127,10 +127,23 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 
 // 修改ResponseBody中的model字段为relay.originalModel
 func modifyResponseBody(c *gin.Context, relay RelayBaseInterface) {
+	// 这里不能从 c.Request.Body 读取，因为这是请求体而不是响应体
+	// 我们应该从响应体的输出缓存中读取
+
+	// 获取响应体的字节内容
+	responseWriter := c.Writer
+	responseRecorder := &gin.HijackWriter{Writer: responseWriter}
+	var bodyBytes []byte
+	bodyBytes = responseRecorder.Body.Bytes()
+
+	// 如果响应体为空，直接返回
+	if len(bodyBytes) == 0 {
+		return
+	}
+
+	// 解析响应体为map
 	var responseBody map[string]interface{}
-	
-	// 读取原始响应体
-	if err := json.NewDecoder(c.Request.Body).Decode(&responseBody); err != nil {
+	if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
 		return
 	}
@@ -148,7 +161,8 @@ func modifyResponseBody(c *gin.Context, relay RelayBaseInterface) {
 	}
 
 	// 设置新的响应体
-	c.Writer.Write(modifiedResponse)
+	responseWriter.WriteHeader(http.StatusOK) // 确保状态码是200
+	responseWriter.Write(modifiedResponse)
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
