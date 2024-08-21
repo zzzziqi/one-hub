@@ -30,6 +30,7 @@ type RelayBaseInterface interface {
 	SetChatCache(allow bool)
 	GetChatCache() *relay_util.ChatCacheProps
 	IsStream() bool
+	postProcessResponse()
 }
 
 func (r *relayBase) SetChatCache(allow bool) {
