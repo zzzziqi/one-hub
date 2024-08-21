@@ -170,7 +170,7 @@ func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []by
 	}
 
 	// Write the modified response
-	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Reset()
 	c.Writer.Write(modifiedResponse)
 }
 
