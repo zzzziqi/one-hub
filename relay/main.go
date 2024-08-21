@@ -145,6 +145,7 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) {
     // 如果响应体为空，直接返回
     if len(bodyBytes) == 0 {
+        logger.LogError(c.Request.Context(), "response body is empty")
         return
     }
 
@@ -156,9 +157,15 @@ func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []by
         return
     }
 
-    // 修改 "model" 字段
+    // 检查是否存在 "model" 字段
     if _, exists := responseBody["model"]; exists {
+        logger.LogInfo(c.Request.Context(), fmt.Sprintf("Original model: %s", responseBody["model"]))
         responseBody["model"] = relay.getOriginalModel()
+        logger.LogInfo(c.Request.Context(), fmt.Sprintf("Modified model: %s", relay.getOriginalModel()))
+    } else {
+        logger.LogError(c.Request.Context(), "response body does not contain 'model' field")
+        // 如果字段不存在，可以选择是否要创建它
+        // responseBody["model"] = relay.getOriginalModel()
     }
 
     // 重新编码修改后的响应体
