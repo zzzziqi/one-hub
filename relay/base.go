@@ -30,7 +30,6 @@ type RelayBaseInterface interface {
 	SetChatCache(allow bool)
 	GetChatCache() *relay_util.ChatCacheProps
 	IsStream() bool
-	postProcessResponse()
 }
 
 func (r *relayBase) SetChatCache(allow bool) {
@@ -74,10 +73,4 @@ func (r *relayBase) getOriginalModel() string {
 func (r *relayBase) getModelName() string {
 	//return r.modelName
 	return r.originalModel
-}
-
-func (r *relayBase) postProcessResponse() {
-    if r.response != nil {
-        r.response.Model = r.originalModel
-    }
 }
