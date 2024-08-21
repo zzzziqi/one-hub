@@ -324,3 +324,35 @@ func relayResponseWithErr(c *gin.Context, err *types.OpenAIErrorWithStatusCode) 
 		"error": err.OpenAIError,
 	})
 }
+
+// modelNameWrapper 包装 StreamReaderInterface 以修改流式响应中的模型名称
+type modelNameWrapper struct {
+	requester.StreamReaderInterface[string]
+	originalModel string
+}
+
+func (w *modelNameWrapper) Recv() (<-chan string, <-chan error) {
+	dataChan, errChan := w.StreamReaderInterface.Recv()
+	wrappedDataChan := make(chan string)
+
+	go func() {
+		defer close(wrappedDataChan)
+		for data := range dataChan {
+			// 解析 JSON
+			var jsonData map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &jsonData); err == nil {
+				// 修改模型名称
+				if _, ok := jsonData["model"]; ok {
+					jsonData["model"] = w.originalModel
+					// 重新编码为 JSON
+					if modifiedData, err := json.Marshal(jsonData); err == nil {
+						data = string(modifiedData)
+					}
+				}
+			}
+			wrappedDataChan <- data
+		}
+	}()
+
+	return wrappedDataChan, errChan
+}
