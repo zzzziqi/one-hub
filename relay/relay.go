@@ -1,6 +1,8 @@
 package relay
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"one-api/common"
 	"one-api/common/config"
@@ -72,6 +74,34 @@ func RelayOnly(c *gin.Context) {
 		relayResponseWithErr(c, errWithCode)
 		return
 	}
+
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		common.AbortWithMessage(c, http.StatusInternalServerError, "failed to read response body")
+		return
+	}
+	// Unmarshal the JSON response
+	var responseBody map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &responseBody)
+	if err != nil {
+		common.AbortWithMessage(c, http.StatusInternalServerError, "failed to unmarshal response body")
+		return
+	}
+
+	// Modify the 'model' field
+	if _, exists := responseBody["model"]; exists {
+		responseBody["model"] = "hillo"
+	}
+
+	// Marshal the modified response back to JSON
+	modifiedBodyBytes, err := json.Marshal(responseBody)
+	if err != nil {
+		common.AbortWithMessage(c, http.StatusInternalServerError, "failed to marshal modified response body")
+		return
+	}
+
+	// Send the modified response
+	c.Data(response.StatusCode, response.Header.Get("Content-Type"), modifiedBodyBytes)
 
 	requestTime := 0
 	requestStartTimeValue := c.Request.Context().Value("requestStartTime")
