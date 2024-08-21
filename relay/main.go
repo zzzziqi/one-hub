@@ -11,25 +11,9 @@ import (
 	"one-api/relay/relay_util"
 	"one-api/types"
 	"time"
-	"bytes"
 
 	"github.com/gin-gonic/gin"
 )
-
-type CustomResponseWriter struct {
-	gin.ResponseWriter
-	body *bytes.Buffer
-}
-
-func (w *CustomResponseWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *CustomResponseWriter) WriteString(s string) (int, error) {
-	w.body.WriteString(s)
-	return w.ResponseWriter.WriteString(s)
-}
 
 func Relay(c *gin.Context) {
 	relay := Path2Relay(c, c.Request.URL.Path)
@@ -37,10 +21,6 @@ func Relay(c *gin.Context) {
 		common.AbortWithMessage(c, http.StatusNotFound, "Not Found")
 		return
 	}
-
-	// Use the custom response writer
-	customWriter := &CustomResponseWriter{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
-	c.Writer = customWriter
 
 	if err := relay.setRequest(); err != nil {
 		common.AbortWithMessage(c, http.StatusBadRequest, err.Error())
@@ -66,8 +46,6 @@ func Relay(c *gin.Context) {
 
 	apiErr, done := RelayHandler(relay, c)
 	if apiErr == nil {
-		// Modify the response body after successful relay handling
-		modifyResponseBody(c, relay, customWriter.body.Bytes())
 		return
 	}
 
@@ -108,9 +86,9 @@ func Relay(c *gin.Context) {
 }
 
 func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIErrorWithStatusCode, done bool) {
-	promptTokens, tonkeErr := relay.getPromptTokens()
-	if tonkeErr != nil {
-		err = common.ErrorWrapperLocal(tonkeErr, "token_error", http.StatusBadRequest)
+	promptTokens, tokenErr := relay.getPromptTokens()
+	if tokenErr != nil {
+		err = common.ErrorWrapperLocal(tokenErr, "token_error", http.StatusBadRequest)
 		done = true
 		return
 	}
@@ -128,7 +106,11 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 		return
 	}
 
-	err, done = relay.send()
+	if relay.IsStream() {
+		err = handleStreamResponse(relay, c)
+	} else {
+		err = handleNonStreamResponse(relay, c)
+	}
 
 	if err != nil {
 		quota.Undo(relay.getContext())
@@ -144,36 +126,53 @@ func RelayHandler(relay RelayBaseInterface, c *gin.Context) (err *types.OpenAIEr
 	return
 }
 
-func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []byte) {
-    // If response body is empty, return directly
-    if len(bodyBytes) == 0 {
-        return
-    }
+func handleStreamResponse(relay RelayBaseInterface, c *gin.Context) *types.OpenAIErrorWithStatusCode {
+	responseStream, err := relay.sendStream()
+	if err != nil {
+		return err
+	}
 
-    // Parse response body as JSON
-    var responseBody map[string]interface{}
-    if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
-        logger.LogError(c.Request.Context(), fmt.Sprintf("failed to decode response body: %v", err))
-        return
-    }
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
 
-    // Modify "model" field
-    if _, exists := responseBody["model"]; exists {
-        responseBody["model"] = relay.getOriginalModel()
-    }
+	c.Stream(func(w io.Writer) bool {
+		for chunk := range responseStream {
+			// 修改 "model" 字段
+			if chunk.Model != "" {
+				chunk.Model = relay.getOriginalModel()
+			}
+			
+			encodedChunk, err := json.Marshal(chunk)
+			if err != nil {
+				logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode chunk: %v", err))
+				return false
+			}
+			
+			c.SSEvent("", string(encodedChunk))
+			return true
+		}
+		return false
+	})
 
-    // Re-encode the modified response
-    modifiedResponse, err := json.Marshal(responseBody)
-    if err != nil {
-        logger.LogError(c.Request.Context(), fmt.Sprintf("failed to encode modified response body: %v", err))
-        return
-    }
+	return nil
+}
 
-    // Reset the response writer
-    c.Writer.Header().Set("Content-Type", "application/json")
-    c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedResponse)))
-    c.Writer.WriteHeader(http.StatusOK)
-    c.Writer.Write(modifiedResponse)
+func handleNonStreamResponse(relay RelayBaseInterface, c *gin.Context) *types.OpenAIErrorWithStatusCode {
+	response, err := relay.send()
+	if err != nil {
+		return err
+	}
+
+	// 修改 "model" 字段
+	if response.Model != "" {
+		response.Model = relay.getOriginalModel()
+	}
+
+	// 编码并发送修改后的响应
+	c.JSON(http.StatusOK, response)
+
+	return nil
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
