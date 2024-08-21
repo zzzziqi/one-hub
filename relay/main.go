@@ -169,9 +169,13 @@ func modifyResponseBody(c *gin.Context, relay RelayBaseInterface, bodyBytes []by
 		return
 	}
 
-	// Write the modified response
-	c.Writer.Reset()
-	c.Writer.Write(modifiedResponse)
+	// 覆盖写入新的响应体
+	c.Writer.Header().Set("Content-Length", fmt.Sprint(len(modifiedResponse)))
+	c.Writer.WriteHeader(http.StatusOK)
+	_, err = c.Writer.Write(modifiedResponse)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("failed to write modified response body: %v", err))
+	}
 }
 
 func cacheProcessing(c *gin.Context, cacheProps *relay_util.ChatCacheProps, isStream bool) {
