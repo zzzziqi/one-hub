@@ -59,7 +59,11 @@ func (r *relayChat) preprocessMessages() error {
 
 	for i, message := range r.chatRequest.Messages {
 		if message.Role == "system" {
-			r.chatRequest.Messages[i].Content = preprompt + message.Content + guideline
+			content, ok := message.Content.(string)
+		        if !ok {
+		             return errors.New("系统消息的内容不是字符串类型")
+		        }
+			r.chatRequest.Messages[i].Content = preprompt + content + guideline
 			return nil
 		}
 	}
