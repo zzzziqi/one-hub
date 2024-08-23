@@ -53,6 +53,10 @@ func (r *relayEmbeddings) send() (err *types.OpenAIErrorWithStatusCode, done boo
 	if err != nil {
 		return
 	}
+
+	// 修改响应中的模型名称
+	response.Model = r.originalModel
+	
 	err = responseJsonClient(r.c, response)
 
 	if err != nil {
