@@ -2,7 +2,6 @@ package relay
 
 import (
 	"os"
-        "strings"
 	"encoding/json"
 	"errors"
 	"fmt"
