@@ -729,7 +729,7 @@
     "useWechatLogin": "使用 Wechat 登录",
     "useLarkLogin": "使用飞书登录"
   },
-  "description": "All in one 的 OpenAI 接口\n整合各种 API 访问方式\n一键部署，开箱即用",
+  "description": "All-in-one Uncensored LLMs API Platform with OpenAI interface",
   "about": {
     "loadingError": "加载关于内容失败...",
     "aboutTitle": "关于",
