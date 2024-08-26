@@ -219,7 +219,7 @@
     "unknown": "Unknown",
     "used": "Used"
   },
-  "description": "All-in-one OpenAI interface\nIntegrates various API access methods\nOne-click deployment, ready to use",
+  "description": "All-in-one NSFW LLMs API Platform with OpenAI interface",
   "footer": {
     "basedOn": "Based on",
     "developedBy": "Developed by",
