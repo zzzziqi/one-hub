@@ -24,15 +24,6 @@ const BaseIndex = () => {
               <Typography variant="h4" sx={{ fontSize: '1.5rem', color: '#fff', lineHeight: 1.5 }}>
                 {t('description')}
               </Typography>
-              <Button
-                variant="contained"
-                startIcon={<GitHub />}
-                href="https://github.com/MartialBE/one-hub"
-                target="_blank"
-                sx={{ backgroundColor: '#24292e', color: '#fff', width: 'fit-content', boxShadow: '0 3px 5px 2px rgba(255, 105, 135, .3)' }}
-              >
-                GitHub
-              </Button>
             </Stack>
           </Grid>
         </Grid>
