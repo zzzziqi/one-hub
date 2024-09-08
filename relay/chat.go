@@ -78,7 +78,7 @@ func getPrepromptAndGuidelineCached(modelName string) (string, string) {
 
 	// 查找模型对应的组
 	cacheMutex.RLock()
-	groupName, modelExists := config.Models[modelName]
+	groupName, modelExists := chatConfig.Models[modelName]
 	cacheMutex.RUnlock()
 
 	// 如果模型存在，获取该组的 preprompt 和 guideline
