@@ -12,6 +12,7 @@ import (
 	"one-api/common/utils"
 	providersBase "one-api/providers/base"
 	"one-api/types"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,6 +27,26 @@ func NewRelayChat(c *gin.Context) *relayChat {
 	relay.c = c
 	return relay
 }
+
+// Config struct 用于解析 JSON 配置
+type Config struct {
+	Groups   map[string]GroupConfig `json:"groups"`
+	Models   map[string]string      `json:"models"`
+	Defaults GroupConfig            `json:"defaults"`
+}
+
+// GroupConfig 定义了 preprompt 和 guideline 的结构
+type GroupConfig struct {
+	Preprompt string `json:"preprompt"`
+	Guideline string `json:"guideline"`
+}
+
+// 全局缓存和同步控制
+var (
+	config     Config
+	configOnce sync.Once
+	cacheMutex sync.RWMutex
+)
 
 func (r *relayChat) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, &r.chatRequest); err != nil {
@@ -55,28 +76,31 @@ func (r *relayChat) setRequest() error {
 }
 
 func (r *relayChat) preprocessMessages() error {
-	preprompt := os.Getenv("CHAT_PREPROMPT")
-	guideline := os.Getenv("CHAT_GUIDELINE")
+	model := r.chatRequest.Model
 
+	// 根据模型名称获取 preprompt 和 guideline
+	preprompt, guideline := getPrepromptAndGuidelineCached(model)
+
+	// 处理 system 消息
 	for i, message := range r.chatRequest.Messages {
 		if message.Role == "system" {
 			content, ok := message.Content.(string)
-		        if !ok {
-		             return errors.New("系统消息的内容不是字符串类型")
-		        }
+			if !ok {
+				return errors.New("系统消息的内容不是字符串类型")
+			}
+			// 为系统消息添加 preprompt 和 guideline
 			r.chatRequest.Messages[i].Content = preprompt + content + guideline
 			return nil
 		}
 	}
 
-	// Optionally add a new system message if none found
-	// Uncomment the following lines if you want this behavior
+	// 如果没有找到 system 消息，可以选择添加新的系统消息
 	/*
-	newSystemMessage := types.ChatCompletionMessage{
+	newSystemMessage := ChatCompletionMessage{
 		Role:    "system",
 		Content: preprompt,
 	}
-	r.chatRequest.Messages = append([]types.ChatCompletionMessage{newSystemMessage}, r.chatRequest.Messages...)
+	r.chatRequest.Messages = append([]ChatCompletionMessage{newSystemMessage}, r.chatRequest.Messages...)
 	*/
 
 	return nil
