@@ -29,7 +29,7 @@ func NewRelayChat(c *gin.Context) *relayChat {
 }
 
 // Config struct 用于解析 JSON 配置
-type Config struct {
+type ChatConfig struct {
 	Groups   map[string]GroupConfig `json:"groups"`
 	Models   map[string]string      `json:"models"`
 	Defaults GroupConfig            `json:"defaults"`
@@ -43,10 +43,58 @@ type GroupConfig struct {
 
 // 全局缓存和同步控制
 var (
-	config     Config
+	chatConfig ChatConfig
 	configOnce sync.Once
 	cacheMutex sync.RWMutex
 )
+
+// Lazy load and parse JSON config from environment variable
+func loadConfig() error {
+	configOnce.Do(func() {
+		// 获取环境变量中的 JSON 配置
+		configData := os.Getenv("CHAT_CONFIG")
+		if configData == "" {
+			fmt.Println("CHAT_CONFIG 环境变量未设置")
+			return
+		}
+
+		// 解析 JSON 配置
+		err := json.Unmarshal([]byte(configData), &chatConfig)
+		if err != nil {
+			fmt.Println("解析 JSON 配置失败:", err)
+		}
+	})
+
+	return nil
+}
+
+// 根据模型名称获取 preprompt 和 guideline
+func getPrepromptAndGuidelineCached(modelName string) (string, string) {
+	// 加载配置 (lazy load)
+	if err := loadConfig(); err != nil {
+		fmt.Println("加载配置失败:", err)
+		return "", ""
+	}
+
+	// 查找模型对应的组
+	cacheMutex.RLock()
+	groupName, modelExists := config.Models[modelName]
+	cacheMutex.RUnlock()
+
+	// 如果模型存在，获取该组的 preprompt 和 guideline
+	if modelExists {
+		cacheMutex.RLock()
+		groupConfig, groupExists := chatConfig.Groups[groupName]
+		cacheMutex.RUnlock()
+
+		if groupExists {
+			return groupConfig.Preprompt, groupConfig.Guideline
+		}
+	}
+
+	// 如果没有找到模型或组，返回默认的 preprompt 和 guideline
+	return chatConfig.Defaults.Preprompt, chatConfig.Defaults.Guideline
+}
 
 func (r *relayChat) setRequest() error {
 	if err := common.UnmarshalBodyReusable(r.c, &r.chatRequest); err != nil {
