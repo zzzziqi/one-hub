@@ -54,7 +54,6 @@ func testChannel(channel *model.Channel, testModel string) (err error, openaiErr
 		return err, nil
 	}
 
-	oriModel = request.Model
 	request.Model = newModelName
 
 	chatProvider, ok := provider.(providers_base.ChatInterface)
@@ -65,7 +64,7 @@ func testChannel(channel *model.Channel, testModel string) (err error, openaiErr
 	chatProvider.SetUsage(&types.Usage{})
 
 	response, openAIErrorWithStatusCode := chatProvider.CreateChatCompletion(request)
-	response.Model = oriModel
+	response.Model = testModel
 
 	if openAIErrorWithStatusCode != nil {
 		return errors.New(openAIErrorWithStatusCode.Message), openAIErrorWithStatusCode
@@ -73,7 +72,7 @@ func testChannel(channel *model.Channel, testModel string) (err error, openaiErr
 
 	// 转换为JSON字符串
 	jsonBytes, _ := json.Marshal(response)
-	logger.SysLog(fmt.Sprintf("测试渠道 %s : %s 返回内容为：%s", channel.Name, oriModel, string(jsonBytes)))
+	logger.SysLog(fmt.Sprintf("测试渠道 %s : %s 返回内容为：%s", channel.Name, testModel, string(jsonBytes)))
 
 	return nil, nil
 }
